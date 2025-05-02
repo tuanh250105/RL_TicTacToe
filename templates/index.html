@@ -1,0 +1,183 @@
+```html
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tic-Tac-Toe</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .cell {
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            cursor: pointer;
+        }
+        .cell.x { color: red; }
+        .cell.o { color: blue; }
+        #board {
+            display: grid;
+            gap: 1px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen">
+    <h1 class="text-3xl font-bold mb-4">Tic-Tac-Toe</h1>
+    
+    <!-- Tùy chọn cấu hình -->
+    <div class="mb-4 flex space-x-4">
+        <div>
+            <label for="agent-type" class="mr-2">Chọn tác nhân:</label>
+            <select id="agent-type" class="border rounded px-2 py-1">
+                <option value="qlearning" {% if agent_type == 'qlearning' %}selected{% endif %}>Q-Learning</option>
+                <option value="dqn" {% if agent_type == 'dqn' %}selected{% endif %}>DQN</option>
+            </select>
+        </div>
+        <div>
+            <label for="board-size" class="mr-2">Kích thước bàn cờ:</label>
+            <select id="board-size" class="border rounded px-2 py-1">
+                <option value="5" {% if board_size == 5 %}selected{% endif %}>5x5</option>
+                <option value="10" {% if board_size == 10 %}selected{% endif %}>10x10</option>
+                <option value="15" {% if board_size == 15 %}selected{% endif %}>15x15</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Thông tin tác nhân -->
+    <p id="epsilon-display" class="mb-4">Epsilon hiện tại: {{ epsilon|float|round(4) }}</p>
+
+    <!-- Bàn cờ -->
+    <div id="board" class="bg-white p-4 rounded-lg shadow-lg">
+        <!-- Bàn cờ sẽ được tạo động bằng JS -->
+    </div>
+
+    <!-- Nút điều khiển -->
+    <div class="mt-4 flex space-x-4">
+        <button id="reset" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+            Chơi lại
+        </button>
+        <button id="reset-stats" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">
+            Đặt lại thống kê
+        </button>
+    </div>
+
+    <!-- Thống kê -->
+    <div class="mt-4">
+        <h2 class="text-xl font-semibold mb-2">Thống kê</h2>
+        <table class="border-collapse border">
+            <thead>
+                <tr class="bg-gray-200">
+                    <th class="border px-4 py-2">Người chơi thắng</th>
+                    <th class="border px-4 py-2">Máy thắng</th>
+                    <th class="border px-4 py-2">Hòa</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr id="stats-row">
+                    <td class="border px-4 py-2 text-center">{{ stats.player_wins }}</td>
+                    <td class="border px-4 py-2 text-center">{{ stats.agent_wins }}</td>
+                    <td class="border px-4 py-2 text-center">{{ stats.draws }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // @ts-ignore
+        let boardSize = {{ board_size }};
+        let board = Array(boardSize).fill().map(() => Array(boardSize).fill(0));
+
+        // Đặt grid-template-columns bằng JavaScript
+        const boardDiv = document.getElementById('board');
+        boardDiv.style.gridTemplateColumns = `repeat(${boardSize}, 50px)`;
+
+        // Tạo bàn cờ
+        function createBoard() {
+            boardDiv.innerHTML = ''; // Xóa bàn cờ cũ
+            for (let i = 0; i < boardSize; i++) {
+                for (let j = 0; j < boardSize; j++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell border';
+                    cell.dataset.row = i;
+                    cell.dataset.col = j;
+                    cell.addEventListener('click', () => makeMove(i, j));
+                    boardDiv.appendChild(cell);
+                }
+            }
+        }
+        createBoard();
+
+        async function makeMove(row, col) {
+            const response = await fetch('/move', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ row, col })
+            });
+            const data = await response.json();
+            updateBoard(data.board, data.done, data.winner, data.stats, data.epsilon);
+        }
+
+        async function resetGame() {
+            const response = await fetch('/reset', {
+                method: 'POST'
+            });
+            const data = await response.json();
+            updateBoard(data.board, data.done, data.winner, data.stats, data.epsilon);
+        }
+
+        async function resetStats() {
+            const response = await fetch('/reset_stats', {
+                method: 'POST'
+            });
+            const data = await response.json();
+            updateBoard(board, false, null, data.stats, data.epsilon);
+        }
+
+        async function updateConfig() {
+            const agentType = document.getElementById('agent-type').value;
+            const newBoardSize = parseInt(document.getElementById('board-size').value);
+            const response = await fetch('/set_config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ agent_type: agentType, board_size: newBoardSize })
+            });
+            const data = await response.json();
+            boardSize = newBoardSize;
+            board = Array(boardSize).fill().map(() => Array(boardSize).fill(0));
+            boardDiv.style.gridTemplateColumns = `repeat(${boardSize}, 50px)`;
+            createBoard();
+            updateBoard(data.board, data.done, data.winner, data.stats, data.epsilon);
+        }
+
+        function updateBoard(newBoard, done, winner, stats, epsilon) {
+            board = newBoard;
+            const cells = document.querySelectorAll('.cell');
+            cells.forEach(cell => {
+                const row = cell.dataset.row;
+                const col = cell.dataset.col;
+                cell.textContent = board[row][col] === 1 ? 'X' : board[row][col] === -1 ? 'O' : '';
+                cell.className = 'cell border ' + (board[row][col] === 1 ? 'x' : board[row][col] === -1 ? 'o' : '');
+            });
+            if (done) {
+                const message = winner === 1 ? 'Bạn thắng!' : winner === -1 ? 'Máy thắng!' : 'Hòa!';
+                alert(message);
+            }
+            // Cập nhật thống kê
+            document.querySelector('#stats-row td:nth-child(1)').textContent = stats.player_wins;
+            document.querySelector('#stats-row td:nth-child(2)').textContent = stats.agent_wins;
+            document.querySelector('#stats-row td:nth-child(3)').textContent = stats.draws;
+            // Cập nhật epsilon
+            document.getElementById('epsilon-display').textContent = `Epsilon hiện tại: ${epsilon.toFixed(4)}`;
+        }
+
+        // Sự kiện cho các nút và cấu hình
+        document.getElementById('reset').addEventListener('click', resetGame);
+        document.getElementById('reset-stats').addEventListener('click', resetStats);
+        document.getElementById('agent-type').addEventListener('change', updateConfig);
+        document.getElementById('board-size').addEventListener('change', updateConfig);
+    </script>
+</body>
+</html>
